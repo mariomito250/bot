@@ -2,6 +2,8 @@ import requests
 import random
 import json
 import threading
+import os
+import time
 from flask import Flask
 
 TOKEN = "6709271221:AAEB6gpH_HN0UYhGV2shXa0mvc6HQc8Gi9A"
@@ -10,11 +12,10 @@ BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 app = Flask(__name__)
 
 players = {}
-boss = {"vida":100}
 
-# =====================
-# salvar dados
-# =====================
+# =========================
+# salvar jogadores
+# =========================
 
 def salvar():
     with open("players.json","w") as f:
@@ -30,9 +31,9 @@ def carregar():
 
 carregar()
 
-# =====================
+# =========================
 # enviar mensagem
-# =====================
+# =========================
 
 def enviar(chat,msg,reply=None):
 
@@ -46,11 +47,14 @@ def enviar(chat,msg,reply=None):
     if reply:
         data["reply_to_message_id"]=reply
 
-    requests.post(url,data=data)
+    try:
+        requests.post(url,data=data)
+    except:
+        pass
 
-# =====================
-# criar player
-# =====================
+# =========================
+# criar personagem
+# =========================
 
 def criar(user,nome):
 
@@ -73,27 +77,9 @@ def criar(user,nome):
 
     return "Você já possui personagem."
 
-# =====================
-# level up
-# =====================
-
-def levelup(p):
-
-    if p["xp"]>=20:
-
-        p["xp"]=0
-        p["level"]+=1
-        p["atk"]+=2
-        p["maxvida"]+=5
-        p["vida"]=p["maxvida"]
-
-        return True
-
-    return False
-
-# =====================
+# =========================
 # status
-# =====================
+# =========================
 
 def status(user):
 
@@ -110,59 +96,15 @@ def status(user):
 🏅 Level {p['level']}
 """
 
-# =====================
-# atacar
-# =====================
-
-def atacar(atk,alvo):
-
-    dano=random.randint(1,players[str(atk)]["atk"])
-
-    players[str(alvo)]["vida"]-=dano
-
-    players[str(atk)]["xp"]+=3
-
-    salvar()
-
-    return f"⚔ Ataque causou {dano} de dano!"
-
-# =====================
-# magia
-# =====================
-
-magias=[
-("🔥 Bola de fogo",6),
-("⚡ Raio",5),
-("❄ Gelo",4)
-]
-
-def magia(alvo):
-
-    m=random.choice(magias)
-
-    nome=m[0]
-    dano=m[1]
-
-    players[str(alvo)]["vida"]-=dano
-
-    salvar()
-
-    return f"{nome} causou {dano} de dano!"
-
-# =====================
+# =========================
 # explorar
-# =====================
+# =========================
 
 def explorar(user):
 
     p=players[str(user)]
 
-    eventos=[
-        "monstro",
-        "ouro",
-        "pocao",
-        "nada"
-    ]
+    eventos=["monstro","ouro","pocao","nada"]
 
     e=random.choice(eventos)
 
@@ -182,10 +124,9 @@ def explorar(user):
         g=random.randint(5,15)
 
         p["ouro"]+=g
-
         salvar()
 
-        return f"💰 achou {g} ouro"
+        return f"💰 encontrou {g} ouro"
 
     if e=="pocao":
 
@@ -196,9 +137,9 @@ def explorar(user):
 
     return "🌳 nada aconteceu"
 
-# =====================
+# =========================
 # usar poção
-# =====================
+# =========================
 
 def curar(user):
 
@@ -207,48 +148,20 @@ def curar(user):
     if p["pocoes"]<=0:
         return "❌ você não tem poções"
 
+    p["pocoes"]-=1
+
     p["vida"]+=10
 
     if p["vida"]>p["maxvida"]:
         p["vida"]=p["maxvida"]
 
-    p["pocoes"]-=1
-
     salvar()
 
     return "🧪 você usou uma poção"
 
-# =====================
-# boss
-# =====================
-
-def atacar_boss(user):
-
-    global boss
-
-    p=players[str(user)]
-
-    dano=random.randint(2,p["atk"])
-
-    boss["vida"]-=dano
-
-    p["xp"]+=5
-
-    salvar()
-
-    if boss["vida"]<=0:
-
-        boss["vida"]=100
-
-        p["ouro"]+=50
-
-        return "🐉 Boss derrotado! ganhou 50 ouro!"
-
-    return f"⚔ causou {dano} no boss\n🐉 vida boss {boss['vida']}"
-
-# =====================
+# =========================
 # ranking
-# =====================
+# =========================
 
 def ranking():
 
@@ -257,14 +170,13 @@ def ranking():
     txt="🏆 Ranking\n\n"
 
     for i,p in enumerate(lista[:10]):
-
         txt+=f"{i+1}. {p[1]['nome']} lvl {p[1]['level']}\n"
 
     return txt
 
-# =====================
-# loop bot
-# =====================
+# =========================
+# bot loop
+# =========================
 
 def bot():
 
@@ -272,91 +184,82 @@ def bot():
 
     while True:
 
-        url=f"{BASE_URL}/getUpdates"
+        try:
 
-        params={"offset":offset,"timeout":30}
+            url=f"{BASE_URL}/getUpdates"
 
-        r=requests.get(url,params=params).json()
+            params={"offset":offset,"timeout":30}
 
-        for up in r["result"]:
+            r=requests.get(url,params=params).json()
 
-            offset=up["update_id"]+1
-
-            msg=up.get("message")
-
-            if not msg:
+            if "result" not in r:
+                print("Erro API:",r)
+                time.sleep(2)
                 continue
 
-            text=msg.get("text","")
+            for up in r["result"]:
 
-            user=msg["from"]["id"]
-            nome=msg["from"]["first_name"]
-            chat=msg["chat"]["id"]
-            mid=msg["message_id"]
+                offset=up["update_id"]+1
 
-            if text=="/start":
+                msg=up.get("message")
 
-                enviar(chat,criar(user,nome),mid)
+                if not msg:
+                    continue
 
-            elif text=="/status":
+                text=msg.get("text","")
 
-                if str(user) in players:
-                    enviar(chat,status(user),mid)
+                user=msg["from"]["id"]
+                nome=msg["from"]["first_name"]
+                chat=msg["chat"]["id"]
+                mid=msg["message_id"]
 
-            elif text=="/explorar":
+                if text=="/start":
 
-                enviar(chat,explorar(user),mid)
+                    enviar(chat,criar(user,nome),mid)
 
-            elif text=="/pocao":
+                elif text=="/status":
 
-                enviar(chat,curar(user),mid)
+                    if str(user) in players:
+                        enviar(chat,status(user),mid)
 
-            elif text=="/boss":
+                elif text=="/explorar":
 
-                enviar(chat,atacar_boss(user),mid)
+                    if str(user) in players:
+                        enviar(chat,explorar(user),mid)
 
-            elif text=="/ranking":
+                elif text=="/pocao":
 
-                enviar(chat,ranking(),mid)
+                    if str(user) in players:
+                        enviar(chat,curar(user),mid)
 
-            elif text=="/atacar":
+                elif text=="/ranking":
 
-                if msg.get("reply_to_message"):
+                    enviar(chat,ranking(),mid)
 
-                    alvo=msg["reply_to_message"]["from"]["id"]
+        except Exception as e:
 
-                    if str(alvo) in players:
+            print("Erro no bot:",e)
+            time.sleep(3)
 
-                        enviar(chat,atacar(user,alvo),mid)
-
-            elif text=="/magia":
-
-                if msg.get("reply_to_message"):
-
-                    alvo=msg["reply_to_message"]["from"]["id"]
-
-                    if str(alvo) in players:
-
-                        enviar(chat,magia(alvo),mid)
-
-# =====================
+# =========================
 # iniciar bot
-# =====================
+# =========================
 
 def iniciar():
 
     threading.Thread(target=bot).start()
 
-# =====================
-# web server
-# =====================
+# =========================
+# servidor web
+# =========================
 
 @app.route("/")
 def home():
-    return "RPG BOT ONLINE"
+    return "BOT ONLINE"
 
-print("RPG BOT ONLINE")
+print("Bot iniciado")
 
 iniciar()
 
-app.run(host="0.0.0.0",port=10000)
+port = int(os.environ.get("PORT",10000))
+app.run(host="0.0.0.0",port=port)
