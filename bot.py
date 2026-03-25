@@ -65,7 +65,7 @@ def personalidade(texto, nome, mood):
     return f"E-ei {nome}...\n{texto} >///<"
 
 # =========================
-# IA GEMINI (ANTI-LOOP)
+# IA GEMINI (ANTI-REPETIÇÃO REAL)
 # =========================
 
 def perguntar_ia(user, texto):
@@ -73,26 +73,27 @@ def perguntar_ia(user, texto):
     historico = memoria[user].get("historico", [])
 
     estilos = [
-        "responda de forma fofa e brincalhona",
-        "responda como uma garota tímida",
-        "responda com leve ciúmes",
-        "responda de forma carinhosa",
-        "responda de forma divertida"
+        "fofa e tímida",
+        "brincalhona",
+        "levemente ciumenta",
+        "carinhosa",
+        "provocante leve"
     ]
-
-    estilo = random.choice(estilos)
 
     contexto = "\n".join(historico[-4:])
 
-    prompt = f"""
-Você é uma waifu anime.
+    def gerar_resposta():
+
+        estilo = random.choice(estilos)
+
+        prompt = f"""
+Você é uma garota anime (waifu).
 
 REGRAS:
-- Nunca repita frases
-- Sempre responda diferente
-- Seja natural e curta
-- Use emoções (😳 😤 💕)
-- {estilo}
+- Nunca repita respostas
+- Seja curta e natural
+- Use emoção (😳 😤 💕)
+- Estilo: {estilo}
 
 {contexto}
 
@@ -100,13 +101,12 @@ Usuário: {texto}
 Waifu:
 """
 
-    try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
         data = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 1.2,
+                "temperature": 1.3,
                 "topP": 0.95,
                 "maxOutputTokens": 80
             }
@@ -117,31 +117,43 @@ Waifu:
 
         print("DEBUG GEMINI:", res)
 
-        if "candidates" not in res:
-            return "Hm... fala de novo 😖"
+        if "candidates" in res:
+            return res["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-        resposta = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return None
 
-        resposta = resposta.replace("Waifu:", "").strip()
+    try:
 
-        # 🚫 anti repetição
-        if resposta == memoria[user].get("ultima_resposta"):
-            respostas_backup = [
-                "Para de me fazer repetir 😤",
-                "Você tá brincando comigo né 😒",
-                "Fala outra coisa vai 😳",
-                "Assim não vale 😤"
-            ]
-            return random.choice(respostas_backup)
+        # 🔁 tenta até 3 vezes evitar repetição
+        for _ in range(3):
 
-        memoria[user]["ultima_resposta"] = resposta
+            resposta = gerar_resposta()
 
-        # salvar histórico
-        historico.append(f"Usuário: {texto}")
-        historico.append(f"Waifu: {resposta}")
-        memoria[user]["historico"] = historico[-8:]
+            if not resposta:
+                continue
 
-        return resposta
+            resposta = resposta.replace("Waifu:", "").strip()
+
+            if resposta != memoria[user].get("ultima_resposta"):
+
+                memoria[user]["ultima_resposta"] = resposta
+
+                historico.append(f"Usuário: {texto}")
+                historico.append(f"Waifu: {resposta}")
+                memoria[user]["historico"] = historico[-8:]
+
+                return resposta
+
+        # 🧠 fallback (nunca repete)
+        respostas_fallback = [
+            "Hmm... fala isso de outro jeito 😳",
+            "Você tá tentando me confundir né 😤",
+            "Hehe, não vou repetir isso não 😏",
+            "Fala algo novo vai 💕",
+            "Assim você me quebra 😖"
+        ]
+
+        return random.choice(respostas_fallback)
 
     except Exception as e:
         print("ERRO GEMINI:", e)
@@ -275,9 +287,9 @@ def iniciar():
 
 @app.route("/")
 def home():
-    return "WAIFU GOD MODE 💖"
+    return "WAIFU GOD FINAL 💖"
 
-print("Waifu GOD (ANTI-REPEAT) iniciando...")
+print("Waifu FINAL iniciando...")
 
 iniciar()
 
