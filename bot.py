@@ -64,7 +64,7 @@ def personalidade(texto, nome, mood):
     return f"E-ei {nome}...\n{texto} >///<"
 
 # =========================
-# IA GEMINI
+# IA GEMINI (CORRIGIDA)
 # =========================
 
 def perguntar_ia(user, texto):
@@ -85,7 +85,7 @@ Waifu:
 """
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
         data = {
             "contents": [
@@ -98,15 +98,23 @@ Waifu:
 
         print("DEBUG GEMINI:", res)
 
-        resposta = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+        # ✅ parser seguro
+        if "candidates" in res and len(res["candidates"]) > 0:
+            parts = res["candidates"][0].get("content", {}).get("parts", [])
+            if len(parts) > 0 and "text" in parts[0]:
+                resposta = parts[0]["text"].strip()
+            else:
+                return "E-eh? fala melhor comigo... 😖"
+        else:
+            return "Hmm... tenta de novo 😢"
 
-        # evitar repetição
+        # 🚫 evitar repetição
         if resposta == memoria[user].get("ultima_resposta"):
-            return "Você tá tentando me fazer repetir? 😤"
+            return "Você tá me testando? 😤 fala outra coisa..."
 
         memoria[user]["ultima_resposta"] = resposta
 
-        # salvar histórico
+        # 🧠 salvar histórico
         historico.append(f"Usuário: {texto}")
         historico.append(f"Waifu: {resposta}")
         memoria[user]["historico"] = historico[-8:]
@@ -115,7 +123,7 @@ Waifu:
 
     except Exception as e:
         print("ERRO GEMINI:", e)
-        return "Deu um bug aqui 😵"
+        return "Deu bug aqui 😵"
 
 # =========================
 # VOZ
@@ -164,9 +172,11 @@ def enviar_texto(chat, msg):
 def enviar_audio(chat, caminho):
     if caminho:
         with open(caminho, "rb") as f:
-            requests.post(f"{BASE_URL}/sendVoice",
-            files={"voice": f},
-            data={"chat_id": chat})
+            requests.post(
+                f"{BASE_URL}/sendVoice",
+                files={"voice": f},
+                data={"chat_id": chat}
+            )
 
 # =========================
 # BOT LOOP
