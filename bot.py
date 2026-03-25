@@ -1,253 +1,131 @@
 import requests
-import random
-import json
-import threading
 import os
 import time
+import threading
+import json
 from flask import Flask
 
 TOKEN = os.getenv("TOKEN")
+ELEVEN_KEY = os.getenv("ELEVEN_KEY")
+
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 app = Flask(__name__)
 
-players = {}
-
 # =========================
-# salvar jogadores
+# MEMORIA
 # =========================
 
-def salvar():
-    with open("players.json", "w") as f:
-        json.dump(players, f)
-
-def carregar():
-    global players
+def carregar_memoria():
     try:
-        with open("players.json") as f:
-            players = json.load(f)
+        with open("memoria.json") as f:
+            return json.load(f)
     except:
-        players = {}
+        return {}
 
-carregar()
+def salvar_memoria():
+    with open("memoria.json", "w") as f:
+        json.dump(memoria, f)
+
+memoria = carregar_memoria()
 
 # =========================
-# enviar mensagem
+# MOODS
 # =========================
 
-def enviar(chat, msg, reply=None):
-    url = f"{BASE_URL}/sendMessage"
+def detectar_mood(texto):
 
-    data = {
-        "chat_id": chat,
-        "text": msg
+    texto = texto.lower()
+
+    if "amo" in texto or "gosto" in texto:
+        return "feliz"
+    if "odeio" in texto or "raiva" in texto:
+        return "brava"
+    if "triste" in texto:
+        return "triste"
+
+    return "normal"
+
+# =========================
+# PERSONALIDADE
+# =========================
+
+def personalidade(texto, nome, mood):
+
+    if mood == "feliz":
+        return f"{nome}~ isso me deixa tão feliz! 💕 {texto}"
+
+    if mood == "triste":
+        return f"{nome}... não fica assim 😢 {texto}"
+
+    if mood == "brava":
+        return f"Hmph! {nome}... você é impossível 😤 {texto}"
+
+    return f"E-ei {nome}... {texto} >///<"
+
+# =========================
+# IA (HuggingFace)
+# =========================
+
+API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
+
+def perguntar_ia(texto):
+
+    try:
+        r = requests.post(API_URL, json={"inputs": texto})
+        return r.json()[0]["generated_text"]
+    except:
+        return "Não entendi muito bem..."
+
+# =========================
+# VOZ REALISTA (ElevenLabs)
+# =========================
+
+def gerar_audio(texto):
+
+    VOICE_ID = "ngvNHfiCrXLPAHcTrZK1"
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
+
+    headers = {
+        "xi-api-key": os.getenv("ELEVEN_KEY"),
+        "Content-Type": "application/json"
     }
 
-    if reply:
-        data["reply_to_message_id"] = reply
-
-    try:
-        requests.post(url, data=data)
-    except:
-        pass
-
-# =========================
-# verificar player
-# =========================
-
-def check_player(user):
-    return str(user) in players
-
-# =========================
-# criar personagem
-# =========================
-
-def criar(user, nome):
-
-    if not check_player(user):
-
-        players[str(user)] = {
-            "nome": nome,
-            "vida": 30,
-            "maxvida": 30,
-            "atk": 5,
-            "ouro": 10,
-            "xp": 0,
-            "level": 1,
-            "pocoes": 1
+    data = {
+        "text": texto,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.3,
+            "similarity_boost": 0.9
         }
+    }
 
-        salvar()
+    r = requests.post(url, json=data, headers=headers)
 
-        return "🧙 Personagem criado!"
+    with open("voz.mp3", "wb") as f:
+        f.write(r.content)
 
-    return "⚠️ Você já possui personagem."
-
-# =========================
-# level up
-# =========================
-
-def verificar_level(p):
-
-    xp_need = p["level"] * 10
-
-    if p["xp"] >= xp_need:
-        p["xp"] = 0
-        p["level"] += 1
-        p["maxvida"] += 5
-        p["atk"] += 2
-        p["vida"] = p["maxvida"]
-
-        return f"🎉 LEVEL UP!\nAgora você é level {p['level']}"
-
-    return None
+    return "voz.mp3"
 
 # =========================
-# status
+# TELEGRAM
 # =========================
 
-def status(user):
+def enviar_texto(chat, msg):
+    requests.post(f"{BASE_URL}/sendMessage", data={
+        "chat_id": chat,
+        "text": msg
+    })
 
-    p = players[str(user)]
-
-    return f"""
-🧙 {p['nome']}
-
-❤️ Vida {p['vida']}/{p['maxvida']}
-⚔ Ataque {p['atk']}
-⭐ XP {p['xp']}
-💰 Ouro {p['ouro']}
-🧪 Poções {p['pocoes']}
-🏅 Level {p['level']}
-"""
+def enviar_audio(chat, caminho):
+    with open(caminho, "rb") as f:
+        requests.post(f"{BASE_URL}/sendVoice",
+        files={"voice": f},
+        data={"chat_id": chat})
 
 # =========================
-# explorar
-# =========================
-
-def explorar(user):
-
-    p = players[str(user)]
-
-    if p["vida"] <= 0:
-        return "💀 Você está morto! Use /reviver"
-
-    eventos = ["monstro", "ouro", "pocao", "nada"]
-
-    e = random.choice(eventos)
-
-    if e == "monstro":
-
-        dano = random.randint(2, 6)
-
-        p["vida"] -= dano
-        p["xp"] += 5
-
-        if p["vida"] <= 0:
-            p["vida"] = 0
-            salvar()
-            return "💀 Você morreu em batalha!"
-
-        lvl = verificar_level(p)
-
-        salvar()
-
-        return f"👹 Monstro!\n💥 perdeu {dano} vida\n{lvl if lvl else ''}"
-
-    if e == "ouro":
-
-        g = random.randint(5, 15)
-
-        p["ouro"] += g
-        salvar()
-
-        return f"💰 encontrou {g} ouro"
-
-    if e == "pocao":
-
-        p["pocoes"] += 1
-        salvar()
-
-        return "🧪 encontrou uma poção"
-
-    return "🌳 nada aconteceu"
-
-# =========================
-# usar poção
-# =========================
-
-def curar(user):
-
-    p = players[str(user)]
-
-    if p["vida"] <= 0:
-        return "💀 Você está morto!"
-
-    if p["pocoes"] <= 0:
-        return "❌ Sem poções"
-
-    p["pocoes"] -= 1
-    p["vida"] += 10
-
-    if p["vida"] > p["maxvida"]:
-        p["vida"] = p["maxvida"]
-
-    salvar()
-
-    return "🧪 curado +10 vida"
-
-# =========================
-# reviver
-# =========================
-
-def reviver(user):
-
-    p = players[str(user)]
-
-    if p["vida"] > 0:
-        return "⚠️ Você não está morto"
-
-    p["vida"] = p["maxvida"] // 2
-
-    salvar()
-
-    return "✨ Você reviveu!"
-
-# =========================
-# loja
-# =========================
-
-def loja(user):
-
-    p = players[str(user)]
-
-    if p["ouro"] < 10:
-        return "❌ Ouro insuficiente"
-
-    p["ouro"] -= 10
-    p["pocoes"] += 1
-
-    salvar()
-
-    return "🛒 Comprou 1 poção por 10 ouro"
-
-# =========================
-# ranking
-# =========================
-
-def ranking():
-
-    lista = sorted(players.items(), key=lambda x: x[1]["level"], reverse=True)
-
-    txt = "🏆 Ranking\n\n"
-
-    for i, p in enumerate(lista[:10]):
-        txt += f"{i+1}. {p[1]['nome']} lvl {p[1]['level']}\n"
-
-    return txt
-
-# =========================
-# bot loop
+# BOT LOOP
 # =========================
 
 def bot():
@@ -258,79 +136,68 @@ def bot():
 
         try:
 
-            url = f"{BASE_URL}/getUpdates"
-            params = {"offset": offset, "timeout": 30}
+            r = requests.get(f"{BASE_URL}/getUpdates", params={
+                "offset": offset,
+                "timeout": 30
+            }).json()
 
-            r = requests.get(url, params=params).json()
-
-            if "result" not in r:
-                time.sleep(2)
-                continue
-
-            for up in r["result"]:
+            for up in r.get("result", []):
 
                 offset = up["update_id"] + 1
 
-                msg = up.get("message")
+                msg = up.get("message", {})
+                chat = msg.get("chat", {}).get("id")
+                user = str(msg.get("from", {}).get("id"))
 
-                if not msg:
-                    continue
+                if "text" in msg:
 
-                text = msg.get("text", "")
-                user = msg["from"]["id"]
-                nome = msg["from"]["first_name"]
-                chat = msg["chat"]["id"]
-                mid = msg["message_id"]
+                    texto = msg["text"]
 
-                # START
-                if text == "/start":
-                    enviar(chat, criar(user, nome), mid)
-                    continue
+                    if user not in memoria:
+                        memoria[user] = {"nome": "senpai", "mood": "normal"}
 
-                # CHECK PLAYER
-                if not check_player(user):
-                    enviar(chat, "❌ Use /start primeiro", mid)
-                    continue
+                    # aprender nome
+                    if "meu nome é" in texto.lower():
+                        nome = texto.split("é")[-1].strip()
+                        memoria[user]["nome"] = nome
+                        salvar_memoria()
+                        enviar_texto(chat, f"Aaah! {nome} 💕")
+                        continue
 
-                # COMANDOS
-                if text == "/status":
-                    enviar(chat, status(user), mid)
+                    mood = detectar_mood(texto)
+                    memoria[user]["mood"] = mood
 
-                elif text == "/explorar":
-                    enviar(chat, explorar(user), mid)
+                    resposta_base = perguntar_ia(texto)
 
-                elif text == "/pocao":
-                    enviar(chat, curar(user), mid)
+                    resposta = personalidade(
+                        resposta_base,
+                        memoria[user]["nome"],
+                        mood
+                    )
 
-                elif text == "/reviver":
-                    enviar(chat, reviver(user), mid)
+                    salvar_memoria()
 
-                elif text == "/loja":
-                    enviar(chat, loja(user), mid)
+                    enviar_texto(chat, resposta)
 
-                elif text == "/ranking":
-                    enviar(chat, ranking(), mid)
+                    audio = gerar_audio(resposta)
+                    enviar_audio(chat, audio)
 
         except Exception as e:
             print("Erro:", e)
             time.sleep(3)
 
 # =========================
-# iniciar bot
+# START
 # =========================
 
 def iniciar():
     threading.Thread(target=bot).start()
 
-# =========================
-# servidor web
-# =========================
-
 @app.route("/")
 def home():
-    return "BOT ONLINE"
+    return "WAIFU GOD MODE 💖"
 
-print("Bot iniciado")
+print("Waifu GOD iniciando...")
 
 iniciar()
 
