@@ -4,6 +4,7 @@ import time
 import threading
 import json
 import random
+import re
 from flask import Flask
 
 TOKEN = os.getenv("TOKEN")
@@ -32,6 +33,13 @@ def salvar_memoria():
 memoria = carregar_memoria()
 
 # =========================
+# LIMPEZA TEXTO (IMPORTANTE PRA VOZ)
+# =========================
+
+def remover_emojis(texto):
+    return re.sub(r'[^\w\s,.!?]', '', texto)
+
+# =========================
 # MOODS
 # =========================
 
@@ -54,18 +62,18 @@ def detectar_mood(texto):
 def personalidade(texto, nome, mood):
 
     if mood == "feliz":
-        return f"{nome}~ isso me deixa tão feliz! 💕\n{texto}"
+        return f"{nome}~ isso me deixa tão feliz!\n{texto}"
 
     if mood == "triste":
-        return f"{nome}... não fica assim 😢\n{texto}"
+        return f"{nome}... não fica assim\n{texto}"
 
     if mood == "brava":
-        return f"Hmph! {nome}... você é impossível 😤\n{texto}"
+        return f"Hmph! {nome}...\n{texto}"
 
-    return f"E-ei {nome}...\n{texto} >///<"
+    return f"E-ei {nome}...\n{texto}"
 
 # =========================
-# IA GEMINI (ANTI-REPETIÇÃO REAL)
+# GEMINI (ANTI-REPETIÇÃO)
 # =========================
 
 def perguntar_ia(user, texto):
@@ -82,23 +90,24 @@ def perguntar_ia(user, texto):
 
     contexto = "\n".join(historico[-4:])
 
-    def gerar_resposta():
+    def gerar():
 
         estilo = random.choice(estilos)
 
         prompt = f"""
-Você é uma garota anime (waifu).
+Você é uma garota anime.
 
 REGRAS:
 - Nunca repita respostas
-- Seja curta e natural
-- Use emoção (😳 😤 💕)
-- Estilo: {estilo}
+- Seja curta
+- Seja natural
+
+Estilo: {estilo}
 
 {contexto}
 
 Usuário: {texto}
-Waifu:
+Resposta:
 """
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
@@ -115,52 +124,36 @@ Waifu:
         r = requests.post(url, json=data)
         res = r.json()
 
-        print("DEBUG GEMINI:", res)
-
         if "candidates" in res:
             return res["candidates"][0]["content"]["parts"][0]["text"].strip()
 
         return None
 
-    try:
+    for _ in range(3):
 
-        # 🔁 tenta até 3 vezes evitar repetição
-        for _ in range(3):
+        resposta = gerar()
 
-            resposta = gerar_resposta()
+        if not resposta:
+            continue
 
-            if not resposta:
-                continue
+        if resposta != memoria[user].get("ultima_resposta"):
 
-            resposta = resposta.replace("Waifu:", "").strip()
+            memoria[user]["ultima_resposta"] = resposta
 
-            if resposta != memoria[user].get("ultima_resposta"):
+            historico.append(f"User: {texto}")
+            historico.append(f"Bot: {resposta}")
+            memoria[user]["historico"] = historico[-8:]
 
-                memoria[user]["ultima_resposta"] = resposta
+            return resposta
 
-                historico.append(f"Usuário: {texto}")
-                historico.append(f"Waifu: {resposta}")
-                memoria[user]["historico"] = historico[-8:]
-
-                return resposta
-
-        # 🧠 fallback (nunca repete)
-        respostas_fallback = [
-            "Hmm... fala isso de outro jeito 😳",
-            "Você tá tentando me confundir né 😤",
-            "Hehe, não vou repetir isso não 😏",
-            "Fala algo novo vai 💕",
-            "Assim você me quebra 😖"
-        ]
-
-        return random.choice(respostas_fallback)
-
-    except Exception as e:
-        print("ERRO GEMINI:", e)
-        return "Deu bug aqui 😵"
+    return random.choice([
+        "fala algo novo 😳",
+        "não vou repetir 😤",
+        "tenta diferente 😏"
+    ])
 
 # =========================
-# VOZ
+# VOZ (CORRIGIDA)
 # =========================
 
 def gerar_audio(texto):
@@ -174,11 +167,13 @@ def gerar_audio(texto):
         "Content-Type": "application/json"
     }
 
+    texto_limpo = remover_emojis(texto).replace("\n", " ").strip()
+
     data = {
-        "text": texto,
+        "text": texto_limpo[:200],
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {
-            "stability": 0.3,
+            "stability": 0.4,
             "similarity_boost": 0.9
         }
     }
@@ -186,11 +181,23 @@ def gerar_audio(texto):
     try:
         r = requests.post(url, json=data, headers=headers)
 
+        print("AUDIO STATUS:", r.status_code)
+
+        if r.status_code != 200:
+            print("ERRO AUDIO:", r.text)
+            return None
+
+        if len(r.content) < 1000:
+            print("AUDIO VAZIO")
+            return None
+
         with open("voz.mp3", "wb") as f:
             f.write(r.content)
 
         return "voz.mp3"
-    except:
+
+    except Exception as e:
+        print("ERRO VOZ:", e)
         return None
 
 # =========================
@@ -213,7 +220,7 @@ def enviar_audio(chat, caminho):
             )
 
 # =========================
-# BOT LOOP
+# LOOP BOT
 # =========================
 
 def bot():
@@ -248,12 +255,11 @@ def bot():
                             "historico": []
                         }
 
-                    # aprender nome
                     if "meu nome é" in texto.lower():
                         nome = texto.split("é")[-1].strip()
                         memoria[user]["nome"] = nome
                         salvar_memoria()
-                        enviar_texto(chat, f"Aaah! {nome} 💕")
+                        enviar_texto(chat, f"{nome}... gostei 💕")
                         continue
 
                     mood = detectar_mood(texto)
@@ -287,9 +293,9 @@ def iniciar():
 
 @app.route("/")
 def home():
-    return "WAIFU GOD FINAL 💖"
+    return "WAIFU ONLINE 💖"
 
-print("Waifu FINAL iniciando...")
+print("Bot iniciando...")
 
 iniciar()
 
