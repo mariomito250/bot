@@ -7,6 +7,7 @@ from flask import Flask
 
 TOKEN = os.getenv("TOKEN")
 ELEVEN_KEY = os.getenv("ELEVEN_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -34,14 +35,13 @@ memoria = carregar_memoria()
 # =========================
 
 def detectar_mood(texto):
-
     texto = texto.lower()
 
-    if "amo" in texto or "gosto" in texto:
+    if any(p in texto for p in ["amo", "gosto", "te amo"]):
         return "feliz"
-    if "odeio" in texto or "raiva" in texto:
+    if any(p in texto for p in ["odeio", "raiva", "idiota"]):
         return "brava"
-    if "triste" in texto:
+    if any(p in texto for p in ["triste", "depressivo", "mal"]):
         return "triste"
 
     return "normal"
@@ -53,15 +53,15 @@ def detectar_mood(texto):
 def personalidade(texto, nome, mood):
 
     if mood == "feliz":
-        return f"{nome}~ isso me deixa tão feliz! 💕 {texto}"
+        return f"{nome}~ isso me deixa tão feliz! 💕\n{texto}"
 
     if mood == "triste":
-        return f"{nome}... não fica assim 😢 {texto}"
+        return f"{nome}... não fica assim 😢\n{texto}"
 
     if mood == "brava":
-        return f"Hmph! {nome}... você é impossível 😤 {texto}"
+        return f"Hmph! {nome}... você é impossível 😤\n{texto}"
 
-    return f"E-ei {nome}... {texto} >///<"
+    return f"E-ei {nome}...\n{texto} >///<"
 
 # =========================
 # IA (HuggingFace)
@@ -69,16 +69,55 @@ def personalidade(texto, nome, mood):
 
 API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
 
-def perguntar_ia(texto):
+def perguntar_ia(user, texto):
+
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}"
+    }
+
+    # histórico curto (memória)
+    historico = memoria[user].get("historico", [])
+
+    prompt = ""
+    for h in historico[-3:]:
+        prompt += f"{h}\n"
+
+    prompt += f"Usuário: {texto}\nWaifu:"
 
     try:
-        r = requests.post(API_URL, json={"inputs": texto})
-        return r.json()[0]["generated_text"]
-    except:
-        return "Não entendi muito bem..."
+        r = requests.post(
+            API_URL,
+            headers=headers,
+            json={"inputs": prompt}
+        )
+
+        data = r.json()
+        print("DEBUG IA:", data)
+
+        if isinstance(data, list) and "generated_text" in data[0]:
+            resposta = data[0]["generated_text"].split("Waifu:")[-1].strip()
+
+            # evitar resposta repetida
+            if resposta == memoria[user].get("ultima_resposta"):
+                return "Hmm... fala outra coisa vai 😳"
+
+            memoria[user]["ultima_resposta"] = resposta
+
+            # salvar histórico
+            historico.append(f"Usuário: {texto}")
+            historico.append(f"Waifu: {resposta}")
+            memoria[user]["historico"] = historico[-6:]
+
+            return resposta
+
+        return "Hmm... não entendi direito 😖"
+
+    except Exception as e:
+        print("ERRO IA:", e)
+        return "Deu um bug aqui 😵"
 
 # =========================
-# VOZ REALISTA (ElevenLabs)
+# VOZ REALISTA
 # =========================
 
 def gerar_audio(texto):
@@ -88,7 +127,7 @@ def gerar_audio(texto):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
 
     headers = {
-        "xi-api-key": os.getenv("ELEVEN_KEY"),
+        "xi-api-key": ELEVEN_KEY,
         "Content-Type": "application/json"
     }
 
@@ -101,12 +140,15 @@ def gerar_audio(texto):
         }
     }
 
-    r = requests.post(url, json=data, headers=headers)
+    try:
+        r = requests.post(url, json=data, headers=headers)
 
-    with open("voz.mp3", "wb") as f:
-        f.write(r.content)
+        with open("voz.mp3", "wb") as f:
+            f.write(r.content)
 
-    return "voz.mp3"
+        return "voz.mp3"
+    except:
+        return None
 
 # =========================
 # TELEGRAM
@@ -119,10 +161,11 @@ def enviar_texto(chat, msg):
     })
 
 def enviar_audio(chat, caminho):
-    with open(caminho, "rb") as f:
-        requests.post(f"{BASE_URL}/sendVoice",
-        files={"voice": f},
-        data={"chat_id": chat})
+    if caminho:
+        with open(caminho, "rb") as f:
+            requests.post(f"{BASE_URL}/sendVoice",
+            files={"voice": f},
+            data={"chat_id": chat})
 
 # =========================
 # BOT LOOP
@@ -154,9 +197,13 @@ def bot():
                     texto = msg["text"]
 
                     if user not in memoria:
-                        memoria[user] = {"nome": "senpai", "mood": "normal"}
+                        memoria[user] = {
+                            "nome": "senpai",
+                            "mood": "normal",
+                            "historico": []
+                        }
 
-                    # aprender nome
+                    # nome
                     if "meu nome é" in texto.lower():
                         nome = texto.split("é")[-1].strip()
                         memoria[user]["nome"] = nome
@@ -167,7 +214,7 @@ def bot():
                     mood = detectar_mood(texto)
                     memoria[user]["mood"] = mood
 
-                    resposta_base = perguntar_ia(texto)
+                    resposta_base = perguntar_ia(user, texto)
 
                     resposta = personalidade(
                         resposta_base,
