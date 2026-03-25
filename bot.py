@@ -7,7 +7,7 @@ from flask import Flask
 
 TOKEN = os.getenv("TOKEN")
 ELEVEN_KEY = os.getenv("ELEVEN_KEY")
-HF_TOKEN = os.getenv("HF_TOKEN")
+GEMINI_KEY = os.getenv("GEMINI_KEY")
 
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -41,7 +41,7 @@ def detectar_mood(texto):
         return "feliz"
     if any(p in texto for p in ["odeio", "raiva", "idiota"]):
         return "brava"
-    if any(p in texto for p in ["triste", "depressivo", "mal"]):
+    if any(p in texto for p in ["triste", "mal", "depressivo"]):
         return "triste"
 
     return "normal"
@@ -64,60 +64,61 @@ def personalidade(texto, nome, mood):
     return f"E-ei {nome}...\n{texto} >///<"
 
 # =========================
-# IA (HuggingFace)
+# IA GEMINI
 # =========================
-
-API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
 
 def perguntar_ia(user, texto):
 
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}"
-    }
-
-    # histórico curto (memória)
     historico = memoria[user].get("historico", [])
 
-    prompt = ""
-    for h in historico[-3:]:
-        prompt += f"{h}\n"
+    contexto = ""
+    for h in historico[-4:]:
+        contexto += f"{h}\n"
 
-    prompt += f"Usuário: {texto}\nWaifu:"
+    prompt = f"""
+Você é uma garota anime (waifu), fofa, levemente ciumenta e divertida.
+Responda de forma natural, curta e variada. Nunca repita frases.
+
+{contexto}
+Usuário: {texto}
+Waifu:
+"""
 
     try:
-        r = requests.post(
-            API_URL,
-            headers=headers,
-            json={"inputs": prompt}
-        )
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_KEY}"
 
-        data = r.json()
-        print("DEBUG IA:", data)
+        data = {
+            "contents": [
+                {"parts": [{"text": prompt}]}
+            ]
+        }
 
-        if isinstance(data, list) and "generated_text" in data[0]:
-            resposta = data[0]["generated_text"].split("Waifu:")[-1].strip()
+        r = requests.post(url, json=data)
+        res = r.json()
 
-            # evitar resposta repetida
-            if resposta == memoria[user].get("ultima_resposta"):
-                return "Hmm... fala outra coisa vai 😳"
+        print("DEBUG GEMINI:", res)
 
-            memoria[user]["ultima_resposta"] = resposta
+        resposta = res["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-            # salvar histórico
-            historico.append(f"Usuário: {texto}")
-            historico.append(f"Waifu: {resposta}")
-            memoria[user]["historico"] = historico[-6:]
+        # evitar repetição
+        if resposta == memoria[user].get("ultima_resposta"):
+            return "Você tá tentando me fazer repetir? 😤"
 
-            return resposta
+        memoria[user]["ultima_resposta"] = resposta
 
-        return "Hmm... não entendi direito 😖"
+        # salvar histórico
+        historico.append(f"Usuário: {texto}")
+        historico.append(f"Waifu: {resposta}")
+        memoria[user]["historico"] = historico[-8:]
+
+        return resposta
 
     except Exception as e:
-        print("ERRO IA:", e)
+        print("ERRO GEMINI:", e)
         return "Deu um bug aqui 😵"
 
 # =========================
-# VOZ REALISTA
+# VOZ
 # =========================
 
 def gerar_audio(texto):
@@ -203,7 +204,7 @@ def bot():
                             "historico": []
                         }
 
-                    # nome
+                    # aprender nome
                     if "meu nome é" in texto.lower():
                         nome = texto.split("é")[-1].strip()
                         memoria[user]["nome"] = nome
@@ -242,9 +243,9 @@ def iniciar():
 
 @app.route("/")
 def home():
-    return "WAIFU GOD MODE 💖"
+    return "WAIFU GEMINI 💖"
 
-print("Waifu GOD iniciando...")
+print("Waifu GOD (Gemini) iniciando...")
 
 iniciar()
 
